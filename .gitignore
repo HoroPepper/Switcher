@@ -1,6 +1,30 @@
+# Dependencies
 node_modules/
+
+# Build output / TS incremental cache
 dist/
+*.tsbuildinfo
+
+# Environment / secrets
 .env
-*.log
-.DS_Store
+.env.*
+!.env.example
+
+# Local sample archives / downloaded data
 data/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage
+coverage/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
