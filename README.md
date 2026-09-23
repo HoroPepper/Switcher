@@ -54,7 +54,6 @@ src/
 proto/clouddrive.proto   CloudDrive2 官方 proto
 scripts/probe.ts         实机联调探针
 test/                    Vitest 测试
-data/                    示例压缩包
 ```
 
 ---
