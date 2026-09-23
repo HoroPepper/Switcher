@@ -1,8 +1,14 @@
 import path from "node:path";
 import { readLinkFiles } from "../archive";
-import { extractOfflineTargets } from "../extract/offline";
+import { extractLinks } from "../extract/links";
+import {
+  extractOfflineTargets,
+  matchesExtension,
+  parseOfflineLine,
+} from "../extract/offline";
 import type {
   CloudClient,
+  CloudFileRef,
   DownloadOutcome,
   ExtractedLink,
   OfflineTask,
@@ -37,10 +43,7 @@ function deriveFolderName(source: string): string {
   return cleaned.length > 0 ? cleaned : "未命名资源";
 }
 
-function toOutcome(
-  link: ExtractedLink,
-  error: unknown,
-): DownloadOutcome {
+function toOutcome(link: ExtractedLink, error: unknown): DownloadOutcome {
   if (isDuplicateError(error)) {
     return {
       link: link.raw,
@@ -129,7 +132,10 @@ function isPending(outcome: DownloadOutcome): boolean {
 async function verifyOfflineStatus(
   client: CloudClient,
   outcomes: DownloadOutcome[],
-  options: ProcessArchiveOptions,
+  options: {
+    offlineWaitMs?: number;
+    offlinePollIntervalMs?: number;
+  },
 ): Promise<OfflineTask[]> {
   const waitMs = Math.max(0, options.offlineWaitMs ?? 0);
   const interval = Math.max(1000, options.offlinePollIntervalMs ?? 5000);
@@ -144,6 +150,59 @@ async function verifyOfflineStatus(
     await sleep(interval);
   }
   return matched;
+}
+
+interface DispatchOptions {
+  parentPath: string;
+  folderName: string;
+  offlineBatchSize?: number;
+  verifyOffline?: boolean;
+  offlineWaitMs?: number;
+  offlinePollIntervalMs?: number;
+}
+
+type DispatchResult = Omit<ProcessResult, "source" | "linkFiles">;
+
+async function dispatchLinks(
+  client: CloudClient,
+  links: ExtractedLink[],
+  options: DispatchOptions,
+): Promise<DispatchResult> {
+  const folder: CloudFileRef = await client.ensureFolder(
+    options.parentPath,
+    options.folderName,
+  );
+
+  const outcomes = await applyLinks(
+    client,
+    links,
+    folder.path,
+    options.offlineBatchSize ?? 1,
+  );
+
+  let offline: OfflineTask[] = [];
+  if (options.verifyOffline !== false) {
+    try {
+      offline = await verifyOfflineStatus(client, outcomes, options);
+    } catch {
+      offline = [];
+    }
+  }
+
+  const added = outcomes.filter((o) => o.ok && !o.duplicate).length;
+  const duplicates = outcomes.filter((o) => o.ok && o.duplicate).length;
+  const failed = outcomes.filter((o) => !o.ok).length;
+
+  return {
+    folderName: options.folderName,
+    folder,
+    links,
+    outcomes,
+    added,
+    duplicates,
+    failed,
+    offline,
+  };
 }
 
 export async function processArchive(
@@ -179,38 +238,63 @@ export async function processArchive(
   }
 
   const folderName = options.folderName ?? deriveFolderName(source);
-  const folder = await client.ensureFolder(options.parentPath, folderName);
-
-  const outcomes = await applyLinks(
-    client,
-    links,
-    folder.path,
-    options.offlineBatchSize ?? 1,
-  );
-
-  let offline: OfflineTask[] = [];
-  if (options.verifyOffline !== false) {
-    try {
-      offline = await verifyOfflineStatus(client, outcomes, options);
-    } catch {
-      offline = [];
-    }
-  }
-
-  const added = outcomes.filter((o) => o.ok && !o.duplicate).length;
-  const duplicates = outcomes.filter((o) => o.ok && o.duplicate).length;
-  const failed = outcomes.filter((o) => !o.ok).length;
+  const dispatched = await dispatchLinks(client, links, {
+    parentPath: options.parentPath,
+    folderName,
+    offlineBatchSize: options.offlineBatchSize,
+    verifyOffline: options.verifyOffline,
+    offlineWaitMs: options.offlineWaitMs,
+    offlinePollIntervalMs: options.offlinePollIntervalMs,
+  });
 
   return {
     source,
-    folderName,
-    folder,
     linkFiles: linkFiles.map((file) => file.name),
-    links,
-    outcomes,
-    added,
-    duplicates,
-    failed,
-    offline,
+    ...dispatched,
   };
+}
+
+export interface ProcessLinksOptions {
+  links: string | string[];
+  parentPath: string;
+  folderName?: string;
+  targetExtensions?: string[];
+  offlineBatchSize?: number;
+  verifyOffline?: boolean;
+  offlineWaitMs?: number;
+  offlinePollIntervalMs?: number;
+}
+
+export async function processLinks(
+  client: CloudClient,
+  options: ProcessLinksOptions,
+): Promise<ProcessResult> {
+  const text = Array.isArray(options.links)
+    ? options.links.join("\n")
+    : options.links;
+
+  let links = extractLinks(text);
+  const extensions = options.targetExtensions ?? [];
+  if (extensions.length > 0) {
+    links = links.filter((link) => {
+      if (link.kind !== "ed2k" && link.kind !== "magnet") return true;
+      const parsed = parseOfflineLine(link.raw);
+      return parsed ? matchesExtension(parsed.name, extensions) : true;
+    });
+  }
+  if (links.length === 0) {
+    throw new Error("未解析到可用的下载链接");
+  }
+
+  const folderName = options.folderName?.trim() || "手动下载";
+  const dispatched = await dispatchLinks(client, links, {
+    parentPath: options.parentPath,
+    folderName,
+    offlineBatchSize: options.offlineBatchSize,
+    verifyOffline: options.verifyOffline,
+    offlineWaitMs: options.offlineWaitMs,
+    offlinePollIntervalMs: options.offlinePollIntervalMs,
+  });
+
+  return { source: "links", linkFiles: [], ...dispatched };
 }

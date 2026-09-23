@@ -1,3 +1,4 @@
+import { parseOfflineLine } from "../extract/offline";
 import type {
   CloudClient,
   CloudFileRef,
@@ -47,7 +48,7 @@ export class MockCloudClient implements CloudClient {
 
   async listAllOfflineFiles(): Promise<OfflineTask[]> {
     return this.offline.map((item) => ({
-      name: item.url.split(/[/\\]/).pop() ?? item.url,
+      name: parseOfflineLine(item.url)?.name ?? item.url,
       url: item.url,
       status: "finished",
       infoHash: "",

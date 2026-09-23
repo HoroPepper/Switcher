@@ -38,7 +38,7 @@ export function parseOfflineLine(line: string): ParsedOfflineLine | undefined {
   return undefined;
 }
 
-function hasExtension(name: string, extensions: string[]): boolean {
+export function matchesExtension(name: string, extensions: string[]): boolean {
   const lower = name.toLowerCase();
   return extensions.some((extension) => {
     const normalized = extension.replace(/^\./, "").toLowerCase();
@@ -56,7 +56,10 @@ export function extractOfflineTargets(
   for (const line of text.split(/\r?\n/)) {
     const parsed = parseOfflineLine(line);
     if (!parsed) continue;
-    if (options.extensions.length > 0 && !hasExtension(parsed.name, options.extensions)) {
+    if (
+      options.extensions.length > 0 &&
+      !matchesExtension(parsed.name, options.extensions)
+    ) {
       continue;
     }
     if (seen.has(parsed.raw)) continue;

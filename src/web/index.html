@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Switcher · 压缩包 → 115</title>
+    <title>Switcher · 压缩包 / 链接 → 115</title>
     <style>
       :root { color-scheme: dark; }
       * { box-sizing: border-box; }
@@ -17,16 +17,25 @@
       h1 { font-size: 26px; margin: 8px 0 6px; }
       .muted { color: #8892a0; font-size: 15px; line-height: 1.5; }
       label { display: block; font-size: 16px; margin: 20px 0 6px; color: #b9bfca; }
-      input[type="text"], input[type="file"] {
+      input[type="text"], input[type="file"], textarea {
         width: 100%; padding: 15px; font-size: 18px; border-radius: 12px;
         border: 1px solid #2c313a; background: #171a20; color: #e8eaed;
+        font-family: inherit;
       }
+      textarea { min-height: 150px; resize: vertical; font-size: 15px; line-height: 1.5; }
       button {
-        width: 100%; margin-top: 28px; padding: 20px; font-size: 21px; font-weight: 700;
+        width: 100%; margin-top: 24px; padding: 20px; font-size: 21px; font-weight: 700;
         border: 0; border-radius: 14px; background: #3b82f6; color: #fff; cursor: pointer;
       }
       button:disabled { opacity: 0.5; cursor: default; }
       progress { width: 100%; height: 14px; margin-top: 20px; }
+      .tabs { display: flex; gap: 10px; margin-top: 24px; }
+      .tabs button {
+        margin: 0; padding: 16px; font-size: 18px; background: #20242c; color: #b9bfca;
+      }
+      .tabs button.active { background: #3b82f6; color: #fff; }
+      .panel { display: none; }
+      .panel.active { display: block; }
       .card {
         margin-top: 22px; padding: 16px; border: 1px solid #232833;
         border-radius: 14px; background: #14171d;
@@ -52,21 +61,34 @@
   </head>
   <body>
     <main>
-      <h1>压缩包 → 115 云下载</h1>
+      <h1>压缩包 / 链接 → 115 云下载</h1>
       <div id="health" class="muted">检测服务中…</div>
 
-      <form id="form">
-        <label for="file">压缩包（.zip / .rar）</label>
-        <input id="file" type="file" accept=".zip,.rar" />
-
-        <label for="folderName">文件夹名（留空则用压缩包名）</label>
+      <div class="card">
+        <label for="folderName">文件夹名（压缩包模式留空则用文件名；链接模式留空为「手动下载」）</label>
         <input id="folderName" type="text" placeholder="13dsvr02009" />
-
         <label for="parentPath">父目录</label>
         <input id="parentPath" type="text" placeholder="/115open" />
+      </div>
 
-        <button id="submit" type="submit">开始处理</button>
-      </form>
+      <div class="tabs">
+        <button type="button" data-tab="archive" class="active">压缩包</button>
+        <button type="button" data-tab="links">直接链接</button>
+      </div>
+
+      <section id="panel-archive" class="panel active">
+        <label for="file">压缩包（.zip / .rar）</label>
+        <input id="file" type="file" accept=".zip,.rar" />
+        <button id="submit-archive" type="button">解压并云下载</button>
+      </section>
+
+      <section id="panel-links" class="panel">
+        <label for="links">链接（每行一条：ed2k / magnet / http / 115 分享）</label>
+        <textarea id="links" placeholder="ed2k://|file|movie.mp4|123|HASH|/&#10;magnet:?xt=urn:btih:..."></textarea>
+        <label for="extensions">仅保留后缀（可选，逗号分隔，留空=不过滤）</label>
+        <input id="extensions" type="text" placeholder="mp4" />
+        <button id="submit-links" type="button">直接云下载</button>
+      </section>
 
       <progress id="progress" value="0" max="100" hidden></progress>
       <div id="status"></div>
@@ -75,6 +97,15 @@
 
     <script>
       const $ = (id) => document.getElementById(id);
+
+      document.querySelectorAll(".tabs button").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
+          document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+          tab.classList.add("active");
+          $("panel-" + tab.dataset.tab).classList.add("active");
+        });
+      });
 
       async function loadHealth() {
         try {
@@ -91,26 +122,27 @@
       }
       loadHealth();
 
-      const form = $("form");
-      form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        start();
-      });
-
-      function setBusy(busy) { $("submit").disabled = busy; }
+      function setBusy(busy) {
+        $("submit-archive").disabled = busy;
+        $("submit-links").disabled = busy;
+      }
       function setProgress(value) {
         $("progress").hidden = false;
         $("progress").value = value;
       }
       function setStatus(text) { $("status").textContent = text; }
+      function common() {
+        return {
+          folderName: $("folderName").value.trim(),
+          parentPath: $("parentPath").value.trim(),
+        };
+      }
 
-      function start() {
+      $("submit-archive").addEventListener("click", () => {
         const file = $("file").files[0];
         if (!file) { alert("请先选择压缩包"); return; }
-
+        const { folderName, parentPath } = common();
         const query = new URLSearchParams();
-        const folderName = $("folderName").value.trim();
-        const parentPath = $("parentPath").value.trim();
         if (folderName) query.set("folderName", folderName);
         if (parentPath) query.set("parentPath", parentPath);
 
@@ -135,17 +167,51 @@
         xhr.onload = () => {
           setBusy(false);
           setProgress(100);
-          let data = null;
-          try { data = JSON.parse(xhr.responseText); } catch {}
-          if (xhr.status >= 200 && xhr.status < 300 && data) {
-            setStatus("处理完成");
-            renderResult(data);
-          } else {
-            setStatus("失败：" + ((data && data.error) || xhr.status));
-          }
+          handleResponse(xhr.status, xhr.responseText);
         };
         xhr.onerror = () => { setBusy(false); setStatus("网络错误"); };
         xhr.send(body);
+      });
+
+      $("submit-links").addEventListener("click", async () => {
+        const links = $("links").value.trim();
+        if (!links) { alert("请先粘贴链接"); return; }
+        const { folderName, parentPath } = common();
+        const extensions = $("extensions").value.trim();
+
+        $("result").innerHTML = "";
+        $("progress").hidden = true;
+        setBusy(true);
+        setStatus("正在建夹 / 云下载 / 查状态…");
+
+        try {
+          const res = await fetch("/download", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              links,
+              folderName: folderName || undefined,
+              parentPath: parentPath || undefined,
+              extensions: extensions || undefined,
+            }),
+          });
+          setBusy(false);
+          handleResponse(res.status, await res.text());
+        } catch {
+          setBusy(false);
+          setStatus("网络错误");
+        }
+      });
+
+      function handleResponse(status, text) {
+        let data = null;
+        try { data = JSON.parse(text); } catch {}
+        if (status >= 200 && status < 300 && data) {
+          setStatus("处理完成");
+          renderResult(data);
+        } else {
+          setStatus("失败：" + ((data && data.error) || status));
+        }
       }
 
       function badge(outcome) {
@@ -169,7 +235,7 @@
 
         $("result").innerHTML =
           '<div class="card"><div class="muted">115 目录</div>' +
-          '<div class="big">' + escapeHtml(data.folder && data.folder.path || "") + "</div>" +
+          '<div class="big">' + escapeHtml((data.folder && data.folder.path) || "") + "</div>" +
           '<div class="counts"><span>新增 <b>' + data.added + "</b></span>" +
           "<span>已存在 <b>" + data.duplicates + "</b></span>" +
           "<span>失败 <b>" + data.failed + "</b></span></div></div>" +
