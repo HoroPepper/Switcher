@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Switcher · 压缩包 → 115</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+        background: #0f1115;
+        color: #e8eaed;
+      }
+      main { max-width: 780px; margin: 0 auto; padding: 24px 18px 72px; }
+      h1 { font-size: 26px; margin: 8px 0 6px; }
+      .muted { color: #8892a0; font-size: 15px; line-height: 1.5; }
+      label { display: block; font-size: 16px; margin: 20px 0 6px; color: #b9bfca; }
+      input[type="text"], input[type="file"] {
+        width: 100%; padding: 15px; font-size: 18px; border-radius: 12px;
+        border: 1px solid #2c313a; background: #171a20; color: #e8eaed;
+      }
+      button {
+        width: 100%; margin-top: 28px; padding: 20px; font-size: 21px; font-weight: 700;
+        border: 0; border-radius: 14px; background: #3b82f6; color: #fff; cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: default; }
+      progress { width: 100%; height: 14px; margin-top: 20px; }
+      .card {
+        margin-top: 22px; padding: 16px; border: 1px solid #232833;
+        border-radius: 14px; background: #14171d;
+      }
+      .big { font-size: 22px; font-weight: 700; margin-top: 4px; word-break: break-all; }
+      .counts { display: flex; flex-wrap: wrap; gap: 20px; font-size: 16px; margin-top: 10px; }
+      .row {
+        display: flex; justify-content: space-between; align-items: center; gap: 12px;
+        padding: 10px 0; border-top: 1px solid #232833; font-size: 15px;
+      }
+      .row:first-of-type { border-top: 0; }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+        word-break: break-all; color: #aab3c0;
+      }
+      .badge { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+      .b-ok { background: #123d24; color: #4ade80; }
+      .b-dup { background: #333a45; color: #cbd5e1; }
+      .b-err { background: #4a1a1f; color: #f87171; }
+      .b-run { background: #1e3a5f; color: #93c5fd; }
+      #status { margin-top: 16px; font-size: 18px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>压缩包 → 115 云下载</h1>
+      <div id="health" class="muted">检测服务中…</div>
+
+      <form id="form">
+        <label for="file">压缩包（.zip / .rar）</label>
+        <input id="file" type="file" accept=".zip,.rar" />
+
+        <label for="folderName">文件夹名（留空则用压缩包名）</label>
+        <input id="folderName" type="text" placeholder="13dsvr02009" />
+
+        <label for="parentPath">父目录</label>
+        <input id="parentPath" type="text" placeholder="/115open" />
+
+        <button id="submit" type="submit">开始处理</button>
+      </form>
+
+      <progress id="progress" value="0" max="100" hidden></progress>
+      <div id="status"></div>
+      <section id="result"></section>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      async function loadHealth() {
+        try {
+          const res = await fetch("/health");
+          const info = await res.json();
+          $("parentPath").value = info.parentPath || "";
+          $("health").textContent =
+            (info.ok ? "云服务正常" : "云服务异常") +
+            (info.mock ? "（Mock 模式）" : "") +
+            (info.message ? " · " + info.message : "");
+        } catch {
+          $("health").textContent = "无法连接后端服务";
+        }
+      }
+      loadHealth();
+
+      const form = $("form");
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        start();
+      });
+
+      function setBusy(busy) { $("submit").disabled = busy; }
+      function setProgress(value) {
+        $("progress").hidden = false;
+        $("progress").value = value;
+      }
+      function setStatus(text) { $("status").textContent = text; }
+
+      function start() {
+        const file = $("file").files[0];
+        if (!file) { alert("请先选择压缩包"); return; }
+
+        const query = new URLSearchParams();
+        const folderName = $("folderName").value.trim();
+        const parentPath = $("parentPath").value.trim();
+        if (folderName) query.set("folderName", folderName);
+        if (parentPath) query.set("parentPath", parentPath);
+
+        const body = new FormData();
+        body.append("archive", file);
+
+        $("result").innerHTML = "";
+        setBusy(true);
+        setProgress(0);
+        setStatus("上传中…");
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/process" + (query.toString() ? "?" + query.toString() : ""));
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            setProgress(percent);
+            setStatus("上传中… " + percent + "%");
+          }
+        };
+        xhr.upload.onload = () => setStatus("上传完成，正在解压 / 建夹 / 云下载 / 查状态…");
+        xhr.onload = () => {
+          setBusy(false);
+          setProgress(100);
+          let data = null;
+          try { data = JSON.parse(xhr.responseText); } catch {}
+          if (xhr.status >= 200 && xhr.status < 300 && data) {
+            setStatus("处理完成");
+            renderResult(data);
+          } else {
+            setStatus("失败：" + ((data && data.error) || xhr.status));
+          }
+        };
+        xhr.onerror = () => { setBusy(false); setStatus("网络错误"); };
+        xhr.send(body);
+      }
+
+      function badge(outcome) {
+        if (!outcome.ok) return '<span class="badge b-err">失败</span>';
+        if (outcome.duplicate) return '<span class="badge b-dup">已存在</span>';
+        if (outcome.status === "finished") return '<span class="badge b-ok">已完成</span>';
+        if (outcome.status === "error") return '<span class="badge b-err">下载失败</span>';
+        if (outcome.status === "downloading") {
+          return '<span class="badge b-run">下载中 ' + Math.round(outcome.percentDone || 0) + "%</span>";
+        }
+        return '<span class="badge b-ok">已加入</span>';
+      }
+
+      function renderResult(data) {
+        const outcomes = (data.outcomes || [])
+          .map((o) => '<div class="row"><span class="mono">' + escapeHtml(shorten(o.link)) + "</span>" + badge(o) + "</div>")
+          .join("");
+        const offline = (data.offline || [])
+          .map((t) => '<div class="row"><span class="mono">' + escapeHtml(t.name) + '</span><span class="muted">' + escapeHtml(t.status) + "</span></div>")
+          .join("");
+
+        $("result").innerHTML =
+          '<div class="card"><div class="muted">115 目录</div>' +
+          '<div class="big">' + escapeHtml(data.folder && data.folder.path || "") + "</div>" +
+          '<div class="counts"><span>新增 <b>' + data.added + "</b></span>" +
+          "<span>已存在 <b>" + data.duplicates + "</b></span>" +
+          "<span>失败 <b>" + data.failed + "</b></span></div></div>" +
+          '<div class="card"><div class="muted">链接投递结果</div>' + (outcomes || '<div class="row">无</div>') + "</div>" +
+          (offline ? '<div class="card"><div class="muted">离线任务状态</div>' + offline + "</div>" : "");
+      }
+
+      function shorten(text) {
+        if (!text) return "";
+        return text.length > 90 ? text.slice(0, 60) + "…" + text.slice(-24) : text;
+      }
+      function escapeHtml(value) {
+        return String(value == null ? "" : value).replace(/[&<>"]/g, (c) => (
+          { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]
+        ));
+      }
+    </script>
+  </body>
+</html>
